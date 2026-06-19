@@ -15,15 +15,25 @@ The core idea is simple: **the model is a parameter.**
 
 ```python
 from langchain_openai import ChatOpenAI
-from langrlm import RLM
+from langrlm import RLM, create_context_store, ContextStoreType
 
 # 1. Build a model the normal LangChain way
 model = ChatOpenAI(model="gpt-4o")
 
-# 2. Hand it to langrlm, which uses it as an RLM agent
-rlm = RLM(model)
+# 2. Point langrlm at the large context the model should reason over
+context = create_context_store(ContextStoreType.FILE, path="big_document.txt")
 
-answer = rlm.invoke("Your complex, multi-step question here")
+# 3. Hand the model + context to langrlm, which uses them as an RLM agent
+rlm = RLM(model, context=context)
+
+answer = rlm.invoke("Summarize every dollar amount mentioned in the document")
+```
+
+By default the same `model` is reused for the recursive sub-calls. You can pass
+a cheaper/faster `sub_model` and cap the recursion with `max_depth`:
+
+```python
+rlm = RLM(model, context=context, sub_model=cheap_model, max_depth=8)
 ```
 
 Because the input is a standard LangChain model, `langrlm` works with **any
