@@ -1,11 +1,12 @@
 import re
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from langrlm.core.prompts import SYSTEM_PROMPT, FORCE_ANSWER_PROMPT
 from langrlm.core.repl import REPL
 from langrlm.core.context_store import BaseContextStore
+from langrlm.utils.schemas import CodeAction
 
 
 class Engine:
@@ -13,6 +14,8 @@ class Engine:
     sub_model: BaseChatModel
     context: BaseContextStore
     max_depth: int
+    rlm_structured: bool
+    sub_structured: bool
 
     def __init__(
             self,
@@ -20,11 +23,20 @@ class Engine:
             sub_model: BaseChatModel,
             context: BaseContextStore,
             max_depth: int,
+            rlm_structured: bool = False,
+            sub_structured: bool = False,
         ):
         self.rlm_model = rlm_model
         self.sub_model = sub_model
         self.context = context
         self.max_depth = max_depth
+
+        self.rlm_structured = rlm_structured
+        self.sub_structured = sub_structured
+
+        self._structured_rlm = (
+            rlm_model.with_structured_output(CodeAction) if rlm_structured else None
+        )
 
     def _llm_query(self, prompt: str, text: str) -> str:
         response = self.sub_model.invoke(f"{prompt}\n\n{text}")
@@ -41,12 +53,17 @@ class Engine:
         ]
 
         for _ in range(self.max_depth):
-            response = self.rlm_model.invoke(messages)
-            text = self._to_text(response.content)
-            code = self._extract_code(text)
+            if self.rlm_structured:
+                action = self._structured_rlm.invoke(messages)
+                code = action.code
+                response = AIMessage(content=f"```python\n{code}\n```")
+            else:
+                response = self.rlm_model.invoke(messages)
+                text = self._to_text(response.content)
+                code = self._extract_code(text)
 
-            if code is None:
-                return text
+                if code is None:
+                    return text
 
             output, done = repl.execute(code)
             if done:
