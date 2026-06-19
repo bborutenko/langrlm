@@ -1,8 +1,10 @@
+import functools
 from abc import ABC, abstractmethod
 
 from langrlm.utils.enums import ContextStoreType
 
-def check_context_is_not_none(func):
+def _check_context_is_not_none(func):
+    @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
         if self.context is None:
             raise ValueError("Context is not loaded. Please load the context before invoking this method.")
@@ -13,7 +15,7 @@ class BaseContextStore(ABC):
     context: None | str
 
     @abstractmethod
-    def load(self) -> str:
+    def load(self) -> None:
         pass
 
     @abstractmethod
@@ -34,17 +36,19 @@ class FileContextStore(BaseContextStore):
         self.path = path
 
     def load(self) -> None:
+        if self.context is not None:
+            return
         try:
             with open(self.path, "r") as f:
                 self.context = f.read()
         except Exception as e:
             raise ValueError(f"Failed to load context from file: {e}")
 
-    @check_context_is_not_none
+    @_check_context_is_not_none
     def slice(self, start: int, end: int) -> str:
         return self.context[start:end]
 
-    @check_context_is_not_none
+    @_check_context_is_not_none
     def size(self) -> int:
         return len(self.context)
 

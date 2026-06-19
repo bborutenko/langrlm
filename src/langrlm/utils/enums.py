@@ -1,5 +1,5 @@
 from enum import Enum
 
-class ContextStoreType(Enum, str):
+class ContextStoreType(str, Enum):
     FILE = "file"
 
