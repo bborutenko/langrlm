@@ -83,6 +83,38 @@ class StringContextStore(BaseContextStore):
         return len(self.context)
 
 
+def to_string_context_store(
+        store: BaseContextStore, start: int, end: int
+    ) -> StringContextStore:
+    """Convert any context store into a StringContextStore over a slice.
+
+    Used when spawning a sub-call: the parent's context is sliced down to the
+    chunk the sub-call should work on, and that chunk is wrapped back into a
+    :class:`StringContextStore` so the nested engine gets the same interface.
+    Works uniformly for any store type — if ``store`` is already a
+    :class:`StringContextStore`, this simply returns a new one holding the
+    requested slice.
+
+    The ``store`` must already be loaded (``store.load()`` called); this
+    function does not load it. In normal use the parent store is loaded by the
+    engine before any sub-call is spawned.
+
+    Args:
+        store: The context store to convert (any :class:`BaseContextStore`),
+            already loaded.
+        start: Start index of the slice.
+        end: End index of the slice.
+
+    Returns:
+        A new :class:`StringContextStore` holding ``store[start:end]``.
+
+    Raises:
+        ValueError: If ``store`` has not been loaded yet.
+    """
+    chunk = store.slice(start, end)
+    return StringContextStore(chunk)
+
+
 def create_context_store(
         context_store_type: ContextStoreType, **kwargs
     ) -> BaseContextStore:
