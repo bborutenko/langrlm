@@ -8,7 +8,10 @@ class ContextStoreType(str, Enum):
 
     Members:
         FILE: Load the context from a local file (requires a ``path`` argument).
+        STRING: Use an in-memory string as the context (requires a ``text``
+            argument). Mainly for nested/recursive RLM calls.
     """
 
     FILE = "file"
+    STRING = "string"
 

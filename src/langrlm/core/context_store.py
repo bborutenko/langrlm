@@ -53,6 +53,36 @@ class FileContextStore(BaseContextStore):
         return len(self.context)
 
 
+class StringContextStore(BaseContextStore):
+    """Context store backed by an in-memory string.
+
+    Used for nested/recursive RLM calls, where a sub-task's context is text
+    that already lives in memory rather than a file on disk.
+    """
+
+    context: None | str
+
+    def __init__(self, text: str):
+        """Create the store.
+
+        Args:
+            text: The context contents. Available immediately; ``load()`` is a
+                no-op.
+        """
+        self.context = text
+
+    def load(self) -> None:
+        return
+
+    @_check_context_is_not_none
+    def slice(self, start: int, end: int) -> str:
+        return self.context[start:end]
+
+    @_check_context_is_not_none
+    def size(self) -> int:
+        return len(self.context)
+
+
 def create_context_store(
         context_store_type: ContextStoreType, **kwargs
     ) -> BaseContextStore:
@@ -64,9 +94,10 @@ def create_context_store(
     Args:
         context_store_type: Which kind of store to create. See
             :class:`~langrlm.utils.enums.ContextStoreType`.
-        **kwargs: Constructor arguments forwarded to the chosen store. For
-            ``ContextStoreType.FILE`` this is ``path`` — the path to the file
-            whose contents become the context.
+        **kwargs: Constructor arguments forwarded to the chosen store.
+            ``ContextStoreType.FILE`` takes ``path`` — the file whose contents
+            become the context; ``ContextStoreType.STRING`` takes ``text`` — the
+            context contents directly.
 
     Returns:
         A ready-to-use :class:`BaseContextStore` instance.
@@ -76,5 +107,7 @@ def create_context_store(
     """
     if context_store_type == ContextStoreType.FILE:
         return FileContextStore(**kwargs)
+    elif context_store_type == ContextStoreType.STRING:
+        return StringContextStore(**kwargs)
     else:
         raise ValueError(f"Unsupported context store type: {context_store_type}")
