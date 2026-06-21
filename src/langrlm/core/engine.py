@@ -137,7 +137,8 @@ class Engine:
         final = self.rlm_model.invoke(messages)
         return self._to_text(final.content)
 
-    def _extract_code(self, text: str) -> str | None:
+    @staticmethod
+    def _extract_code(text: str) -> str | None:
         match = re.search(r"```(?:python|py)?\s*\n(.*?)```", text, re.DOTALL)
         return match.group(1) if match else None
 
