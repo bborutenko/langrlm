@@ -23,14 +23,14 @@ def test_multi_step_then_submit(make_code_model):
     assert rlm.invoke("go") == "found"
 
 
-def test_forced_answer_when_depth_exhausted():
-    # Two code steps without SUBMIT, then the forced-answer turn returns text.
+def test_forced_answer_when_ttl_exceeded():
+    # With ttl=0 the deadline is already passed after the first step, so the
+    # agent is forced to answer with whatever it has.
     model = FakeListChatModel(responses=[
-        "```python\nprint(1)\n```",
-        "```python\nprint(2)\n```",
+        "```python\nprint('working')\n```",
         "FORCED FINAL",
     ])
-    rlm = RLM(model, context=StringContextStore("ctx"), max_depth=2)
+    rlm = RLM(model, context=StringContextStore("ctx"), ttl=0)
     assert rlm.invoke("go") == "FORCED FINAL"
 
 

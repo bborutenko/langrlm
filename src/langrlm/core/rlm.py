@@ -22,7 +22,8 @@ class RLM:
             model: BaseChatModel,
             context: BaseContextStore,
             sub_model: BaseChatModel | None = None,
-            max_depth: int = 10,
+            max_depth: int = 3,
+            ttl: float = 5 * 60,
         ):
         """Build an RLM agent.
 
@@ -34,9 +35,13 @@ class RLM:
                 ``context_size``. See :func:`create_context_store`.
             sub_model: Optional cheaper/faster model used for the recursive
                 sub-calls (``llm_query``). Defaults to ``model`` when omitted.
-            max_depth: Maximum number of REPL steps the root model may take
-                before it is forced to produce a final answer. Acts as the
-                recursion/iteration budget.
+            max_depth: Maximum RLM nesting depth for recursive ``llm_query``
+                sub-calls. Bounds how deep the recursion goes, not the number of
+                REPL steps at each level.
+            ttl: Wall-clock budget in seconds for the whole request. The agent
+                runs the REPL loop until it submits an answer; if the budget is
+                exceeded it is prompted once to answer with what it has. Shared
+                across all nested sub-calls. Defaults to 5 minutes.
         """
         sub_model = sub_model or model
 
@@ -53,6 +58,7 @@ class RLM:
             sub_model=sub_model,
             context=context,
             max_depth=max_depth,
+            ttl=ttl,
             rlm_structured=rlm_structured,
             sub_structured=sub_structured,
         )
@@ -74,8 +80,8 @@ class RLM:
             message: The task/question for the agent to solve over the context.
 
         Returns:
-            The final answer as a string, produced either when the model calls
-            ``SUBMIT(...)`` in its REPL code or when ``max_depth`` is reached
-            and the model is forced to answer.
+            The final answer as a string, produced either when the agent calls
+            ``SUBMIT(...)`` in its REPL code or when the ``ttl`` time budget is
+            exceeded and the model is prompted to answer with what it has.
         """
         return self.engine.complete(message)

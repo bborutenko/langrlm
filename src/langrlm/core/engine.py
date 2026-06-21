@@ -1,4 +1,5 @@
 import re
+import time
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
@@ -23,6 +24,7 @@ class Engine:
     sub_model: BaseChatModel
     context: BaseContextStore
     max_depth: int
+    ttl: float
     rlm_structured: bool
     sub_structured: bool
 
@@ -32,6 +34,7 @@ class Engine:
             sub_model: BaseChatModel,
             context: BaseContextStore,
             max_depth: int,
+            ttl: float = 5 * 60,
             rlm_structured: bool = False,
             sub_structured: bool = False,
         ):
@@ -41,8 +44,12 @@ class Engine:
             rlm_model: Root model that orchestrates the task by writing REPL code.
             sub_model: Model used for recursive sub-calls (``llm_query``).
             context: Data the agent reasons over, exposed to the REPL.
-            max_depth: Maximum number of REPL steps before the model is forced
-                to answer.
+            max_depth: Maximum RLM nesting depth for recursive ``llm_query``
+                sub-calls. Bounds the recursion, not the number of REPL steps.
+            ttl: Wall-clock budget in seconds for the whole request. The REPL
+                loop runs until the agent submits an answer; if the budget is
+                exceeded the model is prompted once to answer with what it has.
+                Defaults to 5 minutes.
             rlm_structured: Whether ``rlm_model`` supports structured output. If
                 True, its code is requested via a schema instead of being parsed
                 out of free text.
@@ -53,6 +60,7 @@ class Engine:
         self.sub_model = sub_model
         self.context = context
         self.max_depth = max_depth
+        self.ttl = ttl
 
         self.rlm_structured = rlm_structured
         self.sub_structured = sub_structured
@@ -61,17 +69,19 @@ class Engine:
             rlm_model.with_structured_output(CodeAction) if rlm_structured else None
         )
 
-    def _llm_query(self, prompt: str, text: str) -> str:
+    def _llm_query(self, prompt: str, text: str, deadline: float) -> str:
         """Answer ``prompt`` over ``text`` using the sub-model.
 
-        This is what the root model's code calls as ``llm_query(prompt, text)``.
+        This is what the root model's code calls as ``llm_query(prompt, text)``
+        (``deadline`` is bound by the engine, not passed by the model).
         Recursion depth is the RLM nesting level, tracked via ``max_depth``:
 
         - At the deepest level (``max_depth <= 1``) the sub-model answers the
           prompt directly over ``text`` — a flat call, so the text actually
           reaches the model.
         - Otherwise ``text`` becomes the context of a nested RLM (its own REPL),
-          run with ``max_depth - 1`` so the nesting is bounded.
+          run with ``max_depth - 1`` so the nesting is bounded. The parent's
+          ``deadline`` is shared so all nested calls obey one overall budget.
         """
         if self.max_depth <= 1:
             response = self.sub_model.invoke(f"{prompt}\n\n{text}")
@@ -82,38 +92,48 @@ class Engine:
             sub_model=self.sub_model,
             context=StringContextStore(text),
             max_depth=self.max_depth - 1,
+            ttl=self.ttl,
             rlm_structured=self.sub_structured,
             sub_structured=self.sub_structured,
         )
-        return sub_engine.complete(prompt)
+        return sub_engine.complete(prompt, deadline=deadline)
 
-    def complete(self, message: str) -> str:
+    def complete(self, message: str, deadline: float | None = None) -> str:
         """Run the full RLM loop for a task and return the final answer.
 
         Loads the context, spins up a fresh REPL, then repeatedly asks the root
         model for a step of code and executes it. Each step the model can read
         the context and query the sub-model; the REPL output is appended back to
-        the conversation. The loop ends when the model calls ``SUBMIT(...)``
-        (or, in text mode, replies without a code block). If ``max_depth`` steps
-        pass without an answer, the model is prompted once more to answer with
-        what it has.
+        the conversation. The agent decides when it is done: the loop ends when
+        it calls ``SUBMIT(...)`` (or, in text mode, replies without a code
+        block). It is not capped by a number of steps — only by the ``ttl`` time
+        budget, after which the model is prompted once to answer with what it
+        has.
 
         Args:
             message: The task/question to solve over the context.
+            deadline: Absolute ``time.monotonic`` deadline shared from a parent
+                call. When omitted, a fresh deadline is derived from ``ttl``.
 
         Returns:
             The final answer as a string.
         """
         self.context.load()
 
-        repl = REPL(context_store=self.context, llm_query_fn=self._llm_query)
+        if deadline is None:
+            deadline = time.monotonic() + self.ttl
+
+        repl = REPL(
+            context_store=self.context,
+            llm_query_fn=lambda prompt, text: self._llm_query(prompt, text, deadline),
+        )
 
         messages = [
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=message),
         ]
 
-        for _ in range(self.max_depth):
+        while True:
             if self.rlm_structured:
                 action = self._structured_rlm.invoke(messages)
                 code = action.code
@@ -133,6 +153,10 @@ class Engine:
             messages.append(response)
             messages.append(HumanMessage(content=f"REPL output:\n{output}"))
 
+            if time.monotonic() >= deadline:
+                return self._force_answer(messages)
+
+    def _force_answer(self, messages: list) -> str:
         messages.append(HumanMessage(content=FORCE_ANSWER_PROMPT))
         final = self.rlm_model.invoke(messages)
         return self._to_text(final.content)
