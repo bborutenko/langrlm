@@ -56,6 +56,24 @@ class FileContextStore(BaseContextStore):
 def create_context_store(
         context_store_type: ContextStoreType, **kwargs
     ) -> BaseContextStore:
+    """Factory that builds a context store of the requested type.
+
+    Selects the concrete :class:`BaseContextStore` implementation for the given
+    ``context_store_type`` and constructs it with the extra keyword arguments.
+
+    Args:
+        context_store_type: Which kind of store to create. See
+            :class:`~langrlm.utils.enums.ContextStoreType`.
+        **kwargs: Constructor arguments forwarded to the chosen store. For
+            ``ContextStoreType.FILE`` this is ``path`` — the path to the file
+            whose contents become the context.
+
+    Returns:
+        A ready-to-use :class:`BaseContextStore` instance.
+
+    Raises:
+        ValueError: If ``context_store_type`` is not supported.
+    """
     if context_store_type == ContextStoreType.FILE:
         return FileContextStore(**kwargs)
     else:

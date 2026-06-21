@@ -6,6 +6,14 @@ from langrlm.utils.schemas import CodeAction, SubAnswer
 
 
 class RLM:
+    """Recursive Language Model agent built on top of a LangChain chat model.
+
+    Wraps a LangChain model and drives it as an RLM: the model writes Python
+    code that is executed in a sandboxed REPL, where it can read the provided
+    context in slices and call a sub-model on those slices, recursing until it
+    submits a final answer.
+    """
+
     engine: Engine
     _has_structured_output: bool
 
@@ -16,6 +24,20 @@ class RLM:
             sub_model: BaseChatModel | None = None,
             max_depth: int = 10,
         ):
+        """Build an RLM agent.
+
+        Args:
+            model: The root LangChain chat model. It orchestrates the task by
+                writing the REPL code on each step.
+            context: The data the agent reasons over (e.g. a large document).
+                Exposed to the model's code via ``context_slice`` /
+                ``context_size``. See :func:`create_context_store`.
+            sub_model: Optional cheaper/faster model used for the recursive
+                sub-calls (``llm_query``). Defaults to ``model`` when omitted.
+            max_depth: Maximum number of REPL steps the root model may take
+                before it is forced to produce a final answer. Acts as the
+                recursion/iteration budget.
+        """
         sub_model = sub_model or model
 
         rlm_structured = self._supports_structured_output(model)
@@ -46,4 +68,14 @@ class RLM:
             return False
 
     def invoke(self, message: str) -> str:
+        """Run the agent on a task and return its final answer.
+
+        Args:
+            message: The task/question for the agent to solve over the context.
+
+        Returns:
+            The final answer as a string, produced either when the model calls
+            ``SUBMIT(...)`` in its REPL code or when ``max_depth`` is reached
+            and the model is forced to answer.
+        """
         return self.engine.complete(message)

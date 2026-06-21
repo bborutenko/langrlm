@@ -10,6 +10,15 @@ from langrlm.utils.schemas import CodeAction
 
 
 class Engine:
+    """Core RLM loop that drives the models against the REPL.
+
+    Runs the recursive interaction: the root model writes Python code, the code
+    is executed in a sandboxed :class:`REPL` (where it can slice the context and
+    call the sub-model via ``llm_query``), and the resulting output is fed back
+    until the model submits an answer or the depth budget is exhausted. Usually
+    constructed by :class:`~langrlm.core.rlm.RLM` rather than directly.
+    """
+
     rlm_model: BaseChatModel
     sub_model: BaseChatModel
     context: BaseContextStore
@@ -26,6 +35,20 @@ class Engine:
             rlm_structured: bool = False,
             sub_structured: bool = False,
         ):
+        """Build the engine.
+
+        Args:
+            rlm_model: Root model that orchestrates the task by writing REPL code.
+            sub_model: Model used for recursive sub-calls (``llm_query``).
+            context: Data the agent reasons over, exposed to the REPL.
+            max_depth: Maximum number of REPL steps before the model is forced
+                to answer.
+            rlm_structured: Whether ``rlm_model`` supports structured output. If
+                True, its code is requested via a schema instead of being parsed
+                out of free text.
+            sub_structured: Whether ``sub_model`` supports structured output.
+                Stored for use by sub-model calls.
+        """
         self.rlm_model = rlm_model
         self.sub_model = sub_model
         self.context = context
@@ -43,6 +66,22 @@ class Engine:
         return self._to_text(response.content)
 
     def complete(self, message: str) -> str:
+        """Run the full RLM loop for a task and return the final answer.
+
+        Loads the context, spins up a fresh REPL, then repeatedly asks the root
+        model for a step of code and executes it. Each step the model can read
+        the context and query the sub-model; the REPL output is appended back to
+        the conversation. The loop ends when the model calls ``SUBMIT(...)``
+        (or, in text mode, replies without a code block). If ``max_depth`` steps
+        pass without an answer, the model is prompted once more to answer with
+        what it has.
+
+        Args:
+            message: The task/question to solve over the context.
+
+        Returns:
+            The final answer as a string.
+        """
         self.context.load()
 
         repl = REPL(context_store=self.context, llm_query_fn=self._llm_query)
