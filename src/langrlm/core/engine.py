@@ -5,7 +5,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from langrlm.core.prompts import SYSTEM_PROMPT, FORCE_ANSWER_PROMPT
 from langrlm.core.repl import REPL
-from langrlm.core.context_store import BaseContextStore
+from langrlm.core.context_store import BaseContextStore, StringContextStore
 from langrlm.utils.schemas import CodeAction
 
 
@@ -62,8 +62,30 @@ class Engine:
         )
 
     def _llm_query(self, prompt: str, text: str) -> str:
-        response = self.sub_model.invoke(f"{prompt}\n\n{text}")
-        return self._to_text(response.content)
+        """Answer ``prompt`` over ``text`` using the sub-model.
+
+        This is what the root model's code calls as ``llm_query(prompt, text)``.
+        Recursion depth is the RLM nesting level, tracked via ``max_depth``:
+
+        - At the deepest level (``max_depth <= 1``) the sub-model answers the
+          prompt directly over ``text`` — a flat call, so the text actually
+          reaches the model.
+        - Otherwise ``text`` becomes the context of a nested RLM (its own REPL),
+          run with ``max_depth - 1`` so the nesting is bounded.
+        """
+        if self.max_depth <= 1:
+            response = self.sub_model.invoke(f"{prompt}\n\n{text}")
+            return self._to_text(response.content)
+
+        sub_engine = Engine(
+            rlm_model=self.sub_model,
+            sub_model=self.sub_model,
+            context=StringContextStore(text),
+            max_depth=self.max_depth - 1,
+            rlm_structured=self.sub_structured,
+            sub_structured=self.sub_structured,
+        )
+        return sub_engine.complete(prompt)
 
     def complete(self, message: str) -> str:
         """Run the full RLM loop for a task and return the final answer.
